@@ -6,6 +6,9 @@ from typing import List, Optional, Union, Callable, Dict, Tuple, Literal
 from dataclasses import dataclass
 import numpy as np
 
+import sys
+sys.path.append('/Users/adityachebrolu/Documents/Auto1111SDK/auto1111sdk/extensions/controlnet')
+
 from scripts.utils import svg_preprocess, read_image
 from scripts import (
     global_state,
@@ -1407,7 +1410,8 @@ class ControlNetUiGroup(object):
 
     @staticmethod
     def try_register_all_callbacks():
-        unit_count = shared.opts.data.get("control_net_unit_count", 3)
+        # unit_count = shared.opts.data.get("control_net_unit_count", 3)
+        unit_count = 3
         all_unit_count = unit_count * 2  # txt2img + img2img.
         if (
             # All A1111 components ControlNet units care about are all registered.

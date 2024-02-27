@@ -7,7 +7,7 @@ from copy import copy
 from typing import Dict, Optional, Tuple, List, NamedTuple
 import modules.scripts as scripts
 from modules import shared, devices, script_callbacks, processing, masking, images
-from modules.api.api import decode_base64_to_image
+import ipaddress
 import gradio as gr
 import time
 
@@ -62,6 +62,7 @@ def clear_all_secondary_control_models(m):
 def find_closest_lora_model_name(search: str):
     if not search:
         return None
+        
     if search in global_state.cn_models:
         return search
     search = search.lower()
@@ -74,6 +75,51 @@ def find_closest_lora_model_name(search: str):
     applicable = sorted(applicable, key=lambda name: len(name))
     return global_state.cn_models_names[applicable[0]]
 
+global_state.update_cn_models()
+
+def verify_url(url):
+    """Returns True if the url refers to a global resource."""
+
+    import socket
+    from urllib.parse import urlparse
+    try:
+        parsed_url = urlparse(url)
+        domain_name = parsed_url.netloc
+        host = socket.gethostbyname_ex(domain_name)
+        for ip in host[2]:
+            ip_addr = ipaddress.ip_address(ip)
+            if not ip_addr.is_global:
+                return False
+    except Exception:
+        return False
+
+    return True
+
+def decode_base64_to_image(encoding):
+    if encoding.startswith("http://") or encoding.startswith("https://"):
+        if not opts.api_enable_requests:
+            raise HTTPException(status_code=500, detail="Requests not allowed")
+
+        if opts.api_forbid_local_requests and not verify_url(encoding):
+            raise HTTPException(status_code=500, detail="Request to local resource not allowed")
+
+        headers = {'user-agent': opts.api_useragent} if opts.api_useragent else {}
+        response = requests.get(encoding, timeout=30, headers=headers)
+        try:
+            image = Image.open(BytesIO(response.content))
+            return image
+        except Exception as e:
+            raise HTTPException(status_code=500, detail="Invalid image url") from e
+
+    if encoding.startswith("data:image/"):
+        encoding = encoding.split(";")[1].split(",")[1]
+    try:
+        image = Image.open(BytesIO(base64.b64decode(encoding)))
+        return image
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Invalid encoded image") from e
+
+
 
 def swap_img2img_pipeline(p: processing.StableDiffusionProcessingImg2Img):
     p.__class__ = processing.StableDiffusionProcessingTxt2Img
@@ -82,10 +128,6 @@ def swap_img2img_pipeline(p: processing.StableDiffusionProcessingImg2Img):
         if hasattr(p, k):
             continue
         setattr(p, k, v)
-
-
-global_state.update_cn_models()
-
 
 def image_dict_from_any(image) -> Optional[Dict[str, np.ndarray]]:
     if image is None:
@@ -211,7 +253,6 @@ def get_pytorch_control(x: np.ndarray) -> torch.Tensor:
     y = y.to(devices.get_device_for("controlnet"))
     y = y.clone()
     return y
-
 
 class Script(scripts.Script, metaclass=(
     utils.TimeMeta if logger.level == logging.DEBUG else type)):
@@ -366,8 +407,8 @@ class Script(scripts.Script, metaclass=(
 
         control_model = Script.build_control_model(p, unet, model)
 
-        if shared.opts.data.get("control_net_model_cache_size", 2) > 0:
-            Script.model_cache[model] = control_model
+        # if shared.opts.data.get("control_net_model_cache_size", 2) > 0:
+        Script.model_cache[model] = control_model
 
         return control_model
 
@@ -400,7 +441,10 @@ class Script(scripts.Script, metaclass=(
 
     @staticmethod
     def get_remote_call(p, attribute, default=None, idx=0, strict=False, force=False):
-        if not force and not shared.opts.data.get("control_net_allow_script_control", False):
+        # if not force and not shared.opts.data.get("control_net_allow_script_control", False):
+        #     return default
+
+        if not force:
             return default
 
         def get_element(obj, strict=False):
@@ -646,7 +690,8 @@ class Script(scripts.Script, metaclass=(
                         alpha = image['mask'][:, :, 0:1]
                         input_image = np.concatenate([color, alpha], axis=2)
                     elif (
-                        not shared.opts.data.get("controlnet_ignore_noninpaint_mask", False) and
+                        # not shared.opts.data.get("controlnet_ignore_noninpaint_mask", False) and
+                        not False and
                         # There is wield gradio issue that would produce mask that is
                         # not pure color when no scribble is made on canvas.
                         # See https://github.com/Mikubill/sd-webui-controlnet/issues/1638.
@@ -846,8 +891,8 @@ class Script(scripts.Script, metaclass=(
         post_processors = []
 
         # cache stuff
-        if self.latest_model_hash != p.sd_model.sd_model_hash:
-            Script.clear_control_model_cache()
+        # if self.latest_model_hash != p.sd_model.sd_model_hash:
+        Script.clear_control_model_cache()
 
         for idx, unit in enumerate(self.enabled_units):
             unit.module = global_state.get_module_basename(unit.module)
@@ -858,13 +903,13 @@ class Script(scripts.Script, metaclass=(
             if key not in module_list:
                 self.unloadable.get(key, lambda:None)()
 
-        self.latest_model_hash = p.sd_model.sd_model_hash
+        # self.latest_model_hash = p.sd_model.sd_model_hash
         high_res_fix = isinstance(p, StableDiffusionProcessingTxt2Img) and getattr(p, 'enable_hr', False)
         h, w, hr_y, hr_x = Script.get_target_dimensions(p)
 
         for idx, unit in enumerate(self.enabled_units):
             Script.bound_check_params(unit)
-            Script.check_sd_version_compatible(unit)
+            # Script.check_sd_version_compatible(unit)
             if (
                 "ip-adapter" in unit.module and
                 not global_state.ip_adapter_pairing_model[unit.module](unit.model)
@@ -1082,6 +1127,7 @@ class Script(scripts.Script, metaclass=(
 
         is_low_vram = any(unit.low_vram for unit in self.enabled_units)
 
+
         for i, param in enumerate(forward_params):
             if param.control_model_type == ControlModelType.IPAdapter:
                 param.control_model.hook(
@@ -1181,7 +1227,8 @@ class Script(scripts.Script, metaclass=(
         if not batch_hijack.instance.is_batch:
             self.enabled_units.clear()
 
-        if shared.opts.data.get("control_net_detectmap_autosaving", False) and self.latest_network is not None:
+        # if shared.opts.data.get("control_net_detectmap_autosaving", False) and self.latest_network is not None:
+        if False and self.latest_network is not None:
             for detect_map, module in self.detected_map:
                 detectmap_dir = os.path.join(shared.opts.data.get("control_net_detectedmap_dir", ""), module)
                 if not os.path.isabs(detectmap_dir):
@@ -1195,7 +1242,8 @@ class Script(scripts.Script, metaclass=(
             return
 
         if not batch_hijack.instance.is_batch:
-            if not shared.opts.data.get("control_net_no_detectmap", False):
+            # if not shared.opts.data.get("control_net_no_detectmap", False):
+            if not False:
                 if 'sd upscale' not in processor_params_flag:
                     if self.detected_map is not None:
                         for detect_map, module in self.detected_map:

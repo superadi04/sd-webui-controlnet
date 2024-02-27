@@ -9,8 +9,7 @@ from scripts.processor import preprocessor_sliders_config, model_free_preprocess
 from scripts.logging import logger
 from scripts.enums import HiResFixOption
 
-from modules.api import api
-
+# from modules.api import api
 
 def get_api_version() -> int:
     return 2
@@ -210,13 +209,43 @@ class ControlNetUnit:
             "instant_id_face_embedding",
         )
 
+def decode_base64_to_image(encoding):
+    from PIL import Image
+    from io import BytesIO
+    import requests
+    import base64
+    
+    if encoding.startswith("http://") or encoding.startswith("https://"):
+        # if not opts.api_enable_requests:
+        #     raise HTTPException(status_code=500, detail="Requests not allowed")
+
+        # if opts.api_forbid_local_requests and not verify_url(encoding):
+        #     raise HTTPException(status_code=500, detail="Request to local resource not allowed")
+
+        # headers = {'user-agent': opts.api_useragent} if opts.api_useragent else {}
+        headers = {}
+        response = requests.get(encoding, timeout=30, headers=headers)
+        try:
+            image = Image.open(BytesIO(response.content))
+            return image
+        except Exception as e:
+            raise Exception(f"status_code=500, detail='Invalid encoded image'")
+
+    if encoding.startswith("data:image/"):
+        encoding = encoding.split(";")[1].split(",")[1]
+    try:
+        image = Image.open(BytesIO(base64.b64decode(encoding)))
+        return image
+    except Exception as e:
+        raise Exception(f"status_code=500, detail='Invalid encoded image'")
+    
 
 def to_base64_nparray(encoding: str):
     """
     Convert a base64 image into the image type the extension uses
     """
 
-    return np.array(api.decode_base64_to_image(encoding)).astype('uint8')
+    return np.array(decode_base64_to_image(encoding)).astype('uint8')
 
 
 def get_all_units_in_processing(p: processing.StableDiffusionProcessing) -> List[ControlNetUnit]:
@@ -449,8 +478,8 @@ def get_models(update: bool = False) -> List[str]:
     update -- Whether to refresh the list from disk. (default False)
     """
 
-    if update:
-        global_state.update_cn_models()
+    # if update:
+    #     global_state.update_cn_models()
 
     return list(global_state.cn_models_names.values())
 

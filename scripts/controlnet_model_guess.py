@@ -14,6 +14,7 @@ from scripts.controlnet_diffusers import convert_from_diffuser_state_dict
 from scripts.controlnet_lora import controlnet_lora_hijack, force_load_state_dict
 from scripts.enums import ControlModelType
 
+import sys
 
 controlnet_default_config = {'adm_in_channels': None,
                              'in_channels': 4,
@@ -124,7 +125,8 @@ def build_model_by_guess(state_dict, unet, model_path: str) -> ControlModel:
         config = copy.deepcopy(controlnet_sdxl_config if is_sdxl else controlnet_default_config)
         config['global_average_pooling'] = False
         config['hint_channels'] = int(state_dict['input_hint_block.0.weight'].shape[1])
-        config['use_fp16'] = devices.dtype_unet == torch.float16
+        # config['use_fp16'] = devices.dtype_unet == torch.float16
+        config['use_fp16'] = '--no-half' not in sys.argv
         with controlnet_lora_hijack():
             network = PlugableControlModel(config, state_dict=None)
         force_load_state_dict(network.control_model, state_dict)
@@ -204,7 +206,8 @@ def build_model_by_guess(state_dict, unet, model_path: str) -> ControlModel:
                 final_state_dict[key] = p_new
             state_dict = final_state_dict
 
-        config['use_fp16'] = devices.dtype_unet == torch.float16
+        # config['use_fp16'] = devices.dtype_unet == torch.float16
+        config['use_fp16'] = '--no-half' not in sys.argv
 
         network = PlugableControlModel(config, state_dict)
         network.to(devices.dtype_unet)
